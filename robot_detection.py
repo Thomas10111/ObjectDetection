@@ -1,23 +1,20 @@
 """
 Robot Object Detection using YOLOv8 + OpenVINO
 -----------------------------------------------
-This script detects objects using a YOLOv8 model optimized with OpenVINO.
-It captures frames from a webcam, runs detection, and provides navigation
-hints based on the detected object's position in the frame.
+Detects objects using a YOLOv8 model optimized with OpenVINO and provides
+navigation hints based on the detected object's position in the frame.
 
 Requirements:
     pip install ultralytics openvino opencv-python
 
 Usage:
-    # Step 0: start virtual environment (pytorch isn't supported on python 3.13 yet) and install dependencies
+    # Step 0: Set up virtual environment (run once)
     py -3.12 -m venv robot_env
-    robot_env\Scripts\activate  
-    
-    # first time only
-    pip install ultralytics openvino opencv-python  
+    robot_env\Scripts\activate
+    pip install ultralytics openvino opencv-python
 
     # Step 1: Export YOLOv8 to OpenVINO format (run once)
-    python robot_detection.py --export
+    python export_openvino.py
 
     # Step 2: Run detection
     python robot_detection.py --target "person"
@@ -33,22 +30,11 @@ from ultralytics import YOLO
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
-MODEL_PT       = "yolov8n.pt"               # Original PyTorch weights
-MODEL_OV_DIR   = "yolov8n_openvino_model"   # OpenVINO export directory
+MODEL_OV_DIR   = "yolov8n_openvino_model"   # OpenVINO export directory (from export_openvino.py)
 CAMERA_INDEX   = 0                          # 0 = default webcam
-FRAME_SIZE     = 320                        # Input resolution (lower = faster)
+FRAME_SIZE     = 320                        # Must match FRAME_SIZE in export_openvino.py
 CONF_THRESHOLD = 0.5                        # Minimum confidence to show a detection
 SKIP_FRAMES    = 2                          # Run inference every N frames
-
-
-# ── Export helper ─────────────────────────────────────────────────────────────
-
-def export_to_openvino():
-    """Convert yolov8n.pt to OpenVINO IR format (run this once)."""
-    print(f"[INFO] Exporting {MODEL_PT} to OpenVINO format ...")
-    model = YOLO(MODEL_PT)
-    model.export(format="openvino", imgsz=FRAME_SIZE)
-    print(f"[INFO] Export complete → {MODEL_OV_DIR}/")
 
 
 # ── Navigation logic ──────────────────────────────────────────────────────────
@@ -58,8 +44,8 @@ def get_navigation_hint(box_center_x: float, frame_width: int) -> str:
     Return a simple navigation command based on where the target is
     horizontally in the frame.
 
-        LEFT 25% │ CENTER 50% │ RIGHT 25%
-        TURN LEFT │  GO AHEAD  │ TURN RIGHT
+        LEFT 35% │ CENTER 30% │ RIGHT 35%
+        TURN LEFT │ GO STRAIGHT │ TURN RIGHT
     """
     ratio = box_center_x / frame_width
     if ratio < 0.35:
@@ -80,12 +66,12 @@ class ObjectDetector:
 
     def __init__(self, target_label: str):
         print(f"[INFO] Loading OpenVINO model from '{MODEL_OV_DIR}/' ...")
-        self.model        = YOLO(f"{MODEL_OV_DIR}/")
-        self.target_label = target_label.lower()
-        self.latest_frame = None
+        self.model          = YOLO(f"{MODEL_OV_DIR}/")
+        self.target_label   = target_label.lower()
+        self.latest_frame   = None
         self.latest_results = None
-        self._lock        = threading.Lock()
-        self._running     = True
+        self._lock          = threading.Lock()
+        self._running       = True
 
         self._thread = threading.Thread(target=self._inference_loop, daemon=True)
         self._thread.start()
@@ -175,10 +161,10 @@ def draw_navigation_overlay(frame: np.ndarray, hint: str | None, target_label: s
     cv2.addWeighted(overlay, 0.5, frame, 0.5, 0, frame)
 
     if hint:
-        color = (0, 255, 100)
+        color  = (0, 255, 100)
         status = f"TARGET: {target_label.upper()}  |  NAV: {hint}"
     else:
-        color = (100, 100, 255)
+        color  = (100, 100, 255)
         status = f"TARGET: {target_label.upper()}  |  SEARCHING ..."
 
     cv2.putText(frame, status, (10, h - 15),
@@ -193,8 +179,8 @@ def run_detection(target_label: str):
         print("[ERROR] Cannot open camera.")
         return
 
-    detector   = ObjectDetector(target_label)
-    frame_idx  = 0
+    detector  = ObjectDetector(target_label)
+    frame_idx = 0
 
     print("[INFO] Press 'q' to quit.")
 
@@ -211,7 +197,7 @@ def run_detection(target_label: str):
         frame_idx += 1
 
         # Retrieve latest results (may be from a previous frame — that's OK)
-        results  = detector.get_results()
+        results = detector.get_results()
         frame, nav_hint = draw_detections(frame, results, target_label)
         draw_navigation_overlay(frame, nav_hint, target_label)
 
@@ -231,11 +217,6 @@ def run_detection(target_label: str):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="YOLOv8 + OpenVINO robot detector")
     parser.add_argument(
-        "--export",
-        action="store_true",
-        help="Export yolov8n.pt to OpenVINO format, then exit.",
-    )
-    parser.add_argument(
         "--target",
         type=str,
         default="person",
@@ -243,7 +224,4 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    if args.export:
-        export_to_openvino()
-    else:
-        run_detection(args.target)
+    run_detection(args.target)
